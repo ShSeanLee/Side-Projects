@@ -65,7 +65,7 @@ def get_current_price(market="NAS", code="AAPL"):
     return float(res.json()['output']['last'])
 
 def get_target_price(market="NAS", code="AAPL"):
-    """변동성 돌파 전략으로 매수 목표가 조회"""
+    """직전 1년 최고가보다 40% 이상 하락했는지 보기: 추가 매수 알림"""
     PATH = "uapi/overseas-price/v1/quotations/dailyprice"
     URL = f"{URL_BASE}/{PATH}"
     headers = {"Content-Type":"application/json", 
@@ -73,19 +73,33 @@ def get_target_price(market="NAS", code="AAPL"):
         "appKey":APP_KEY,
         "appSecret":APP_SECRET,
         "tr_id":"HHDFS76240000"}
-    params = {
-        "AUTH":"",
-        "EXCD":market,
-        "SYMB":code,
-        "GUBN":"0",
-        "BYMD":"",
-        "MODP":"0"
-    }
-    res = requests.get(URL, headers=headers, params=params)
-    stck_oprc = float(res.json()['output2'][0]['open']) #오늘 시가
-    stck_hgpr = float(res.json()['output2'][1]['high']) #전일 고가
-    stck_lwpr = float(res.json()['output2'][1]['low']) #전일 저가
-    target_price = stck_oprc + (stck_hgpr - stck_lwpr) * 0.5
+    
+    starting_date = ""
+    price_tmp = []
+
+    for p in range(3): # 최근 100, 100~200, 200~300일
+        params = {
+            "AUTH":"",
+            "EXCD":market,
+            "SYMB":code,
+            "GUBN":"0",
+            "BYMD":starting_date,
+            "MODP":"0"
+        }
+        res = requests.get(URL, headers=headers, params=params) 
+        stck_oprc = float(res.json()['output2'][0]['open']) #오늘 시가
+        # stck_hgpr = float(res.json()['output2'][1]['high']) #전일 고가
+        # stck_lwpr = float(res.json()['output2'][1]['low']) #전일 저가
+        res_json = res.json()['output2']
+        
+        for date in range(len(res_json)): 
+            price_tmp.append(float(res_json[date]['high']))
+        starting_date = res_json[date]['xymd']
+        
+
+    # target_price = stck_oprc + (stck_hgpr - stck_lwpr) * 0.5
+    target_price = max(price_tmp)
+    
     return target_price
 
 def get_stock_balance():
@@ -233,13 +247,18 @@ def get_exchange_rate():
         exchange_rate = float(res.json()['output2'][0]['frst_bltn_exrt'])
     return exchange_rate
 
+# 꾸준한 매수 전략 (Just Keep Buying)
+# 1. 환율이 일정 금액 이하로 하락했을 때, 
+# 2. ETF 가격이 이전 고점 가격 대비 40% 이하로 떨어졌을 때 더 많이 매수
+# 1년 후 주가가 다시 크게 상승하면 매도
+
 # 자동매매 시작
 try:
     ACCESS_TOKEN = get_access_token()
 
-    nasd_symbol_list = ["AAPL"] # 매수 희망 종목 리스트 (NASD)
-    nyse_symbol_list = ["KO"] # 매수 희망 종목 리스트 (NYSE)
-    amex_symbol_list = ["LIT"] # 매수 희망 종목 리스트 (AMEX)
+    nasd_symbol_list = [] # 매수 희망 종목 리스트 (NASD)
+    nyse_symbol_list = ["SPY"] # 매수 희망 종목 리스트 (NYSE)
+    amex_symbol_list = [] # 매수 희망 종목 리스트 (AMEX)
     symbol_list = nasd_symbol_list + nyse_symbol_list + amex_symbol_list
     bought_list = [] # 매수 완료된 종목 리스트
     total_cash = get_balance() # 보유 현금 조회
@@ -247,8 +266,8 @@ try:
     stock_dict = get_stock_balance() # 보유 주식 조회
     for sym in stock_dict.keys():
         bought_list.append(sym)
-    target_buy_count = 3 # 매수할 종목 수
-    buy_percent = 0.33 # 종목당 매수 금액 비율
+    target_buy_count = 1 # 매수할 종목 수
+    buy_percent = 1 # 종목당 매수 금액 비율
     buy_amount = total_cash * buy_percent / exchange_rate # 종목별 주문 금액 계산 (달러)
     soldout = False
 
@@ -263,73 +282,69 @@ try:
         if today == 5 or today == 6:  # 토요일이나 일요일이면 자동 종료
             send_message("주말이므로 프로그램을 종료합니다.")
             break
-        if t_9 < t_now < t_start and soldout == False: # 잔여 수량 매도
-            for sym, qty in stock_dict.items():
-                market1 = "NASD"
-                market2 = "NAS"
-                if sym in nyse_symbol_list:
-                    market1 = "NYSE"
-                    market2 = "NYS"
-                if sym in amex_symbol_list:
-                    market1 = "AMEX"
-                    market2 = "AMS"
-                sell(market=market1, code=sym, qty=qty, price=get_current_price(market=market2, code=sym))
-            soldout == True
-            bought_list = []
-            time.sleep(1)
-            stock_dict = get_stock_balance()
-        if t_start < t_now < t_sell :  # AM 09:35 ~ PM 03:45 : 매수
+        # if t_9 < t_now < t_start and soldout == False: # 잔여 수량 매도
+        #     for sym, qty in stock_dict.items():
+        #         market1 = "NASD"
+        #         market2 = "NAS"
+        #         if sym in nyse_symbol_list:
+        #             market1 = "NYSE"
+        #             market2 = "NYS"
+        #         if sym in amex_symbol_list:
+        #             market1 = "AMEX"
+        #             market2 = "AMS"
+        #         sell(market=market1, code=sym, qty=qty, price=get_current_price(market=market2, code=sym))
+        #     soldout == True
+        #     bought_list = []
+        #     time.sleep(1)
+        #     stock_dict = get_stock_balance()
+        if t_start < t_now < t_sell :  # AM 09:35 ~ PM 03:45 : 매수 시간
+
             for sym in symbol_list:
-                if len(bought_list) < target_buy_count:
-                    if sym in bought_list:
-                        continue
-                    market1 = "NASD"
-                    market2 = "NAS"
-                    if sym in nyse_symbol_list:
-                        market1 = "NYSE"
-                        market2 = "NYS"
-                    if sym in amex_symbol_list:
-                        market1 = "AMEX"
-                        market2 = "AMS"
-                    target_price = get_target_price(market2, sym)
-                    current_price = get_current_price(market2, sym)
-                    if target_price < current_price:
-                        buy_qty = 0  # 매수할 수량 초기화
-                        buy_qty = int(buy_amount // current_price)
-                        if buy_qty > 0:
-                            send_message(f"{sym} 목표가 달성({target_price} < {current_price}) 매수를 시도합니다.")
-                            market = "NASD"
-                            if sym in nyse_symbol_list:
-                                market = "NYSE"
-                            if sym in amex_symbol_list:
-                                market = "AMEX"
-                            result = buy(market=market1, code=sym, qty=buy_qty, price=get_current_price(market=market2, code=sym))
-                            time.sleep(1)
-                            if result:
-                                soldout = False
-                                bought_list.append(sym)
-                                get_stock_balance()
+                market1 = "NYSE"
+                market2 = "NYS"
+                target_price = get_target_price(market2, sym)
+                current_price = get_current_price(market2, sym)
+                
+                if target_price < current_price:
+                    buy_qty = 0  # 매수할 수량 초기화
+                    buy_qty = int(buy_amount // current_price)
+                    if buy_qty > 0:
+                        send_message(f"{sym} 해당 금액으로 ({current_price}) 매수를 시도합니다.")
+                        # market = "NASD"
+                        # if sym in nyse_symbol_list:
+                        #     market = "NYSE"
+                        # if sym in amex_symbol_list:
+                        #     market = "AMEX"
+                        market = "NYSE"
+                        result = buy(market=market1, code=sym, qty=buy_qty, price=get_current_price(market=market2, code=sym))
+                        time.sleep(1)
+                        if result:
+                            soldout = False
+                            bought_list.append(sym)
+                            get_stock_balance()
+                    else:
+                        send_message(f"{sym} 해당 금액으로 ({current_price}) 매수를 시도합니다.")
                     time.sleep(1)
             time.sleep(1)
             if t_now.minute == 30 and t_now.second <= 5: 
                 get_stock_balance()
                 time.sleep(5)
-        if t_sell < t_now < t_exit:  # PM 03:45 ~ PM 03:50 : 일괄 매도
-            if soldout == False:
-                stock_dict = get_stock_balance()
-                for sym, qty in stock_dict.items():
-                    market1 = "NASD"
-                    market2 = "NAS"
-                    if sym in nyse_symbol_list:
-                        market1 = "NYSE"
-                        market2 = "NYS"
-                    if sym in amex_symbol_list:
-                        market1 = "AMEX"
-                        market2 = "AMS"
-                    sell(market=market1, code=sym, qty=qty, price=get_current_price(market=market2, code=sym))
-                soldout = True
-                bought_list = []
-                time.sleep(1)
+        # if t_sell < t_now < t_exit:  # PM 03:45 ~ PM 03:50 : 일괄 매도
+        #     if soldout == False:
+        #         stock_dict = get_stock_balance()
+        #         for sym, qty in stock_dict.items():
+        #             market1 = "NASD"
+        #             market2 = "NAS"
+        #             if sym in nyse_symbol_list:
+        #                 market1 = "NYSE"
+        #                 market2 = "NYS"
+        #             if sym in amex_symbol_list:
+        #                 market1 = "AMEX"
+        #                 market2 = "AMS"
+        #             sell(market=market1, code=sym, qty=qty, price=get_current_price(market=market2, code=sym))
+        #         soldout = True
+        #         bought_list = []
+        #         time.sleep(1)
         if t_exit < t_now:  # PM 03:50 ~ :프로그램 종료
             send_message("프로그램을 종료합니다.")
             break
