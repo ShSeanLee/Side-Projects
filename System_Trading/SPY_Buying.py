@@ -305,26 +305,31 @@ try:
                 target_price = get_target_price(market2, sym)
                 current_price = get_current_price(market2, sym)
                 
-                if target_price < current_price:
-                    buy_qty = 0  # 매수할 수량 초기화
-                    buy_qty = int(buy_amount // current_price)
-                    if buy_qty > 0:
-                        send_message(f"{sym} 해당 금액으로 ({current_price}) 매수를 시도합니다.")
-                        # market = "NASD"
-                        # if sym in nyse_symbol_list:
-                        #     market = "NYSE"
-                        # if sym in amex_symbol_list:
-                        #     market = "AMEX"
-                        market = "NYSE"
-                        result = buy(market=market1, code=sym, qty=buy_qty, price=get_current_price(market=market2, code=sym))
-                        time.sleep(1)
-                        if result:
-                            soldout = False
-                            bought_list.append(sym)
-                            get_stock_balance()
-                    else:
-                        send_message(f"{sym} 해당 금액으로 ({current_price}) 매수를 시도합니다.")
+                buy_qty = 0  # 매수할 수량 초기화
+                buy_qty = int(buy_amount // current_price)
+                if buy_qty > 0:
+                    send_message(f"{sym} 해당 금액({current_price})으로 매수를 시도합니다.")
+                    # market = "NASD"
+                    # if sym in nyse_symbol_list:
+                    #     market = "NYSE"
+                    # if sym in amex_symbol_list:
+                    #     market = "AMEX"
+                    market = "NYSE"
+                    result = buy(market=market1, code=sym, qty=buy_qty, price=get_current_price(market=market2, code=sym))
                     time.sleep(1)
+                    if result:
+                        soldout = False
+                        bought_list.append(sym)
+                        get_stock_balance()
+                else:
+                    send_message(f"{sym} 잔액 부족으로 해당 금액({current_price})으로 매수하지 못했습니다.")
+                time.sleep(1)
+
+                if target_price * 0.6 >= current_price: # 최근 300일 중 최고가 보다 40% 이상 하락했을 때에는
+                    send_message(f"{sym} 최근 300일 최고가({target_price})보다 40% 이상 급락하여 ({current_price}) 추가 매수 검토 바랍니다.")
+                if exchange_rate < 1200:
+                    send_message(f"환율 급락({exchange_rate})으로 추가 매수 검토 바랍니다.")
+
             time.sleep(1)
             if t_now.minute == 30 and t_now.second <= 5: 
                 get_stock_balance()
@@ -348,6 +353,7 @@ try:
         if t_exit < t_now:  # PM 03:50 ~ :프로그램 종료
             send_message("프로그램을 종료합니다.")
             break
+        
 except Exception as e:
     send_message(f"[오류 발생]{e}")
     time.sleep(1)
